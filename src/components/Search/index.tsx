@@ -2,6 +2,8 @@ import FullPageErrorView from '@components/BlockingViews/FullPageErrorView';
 import FullPageOfflineBlockingView from '@components/BlockingViews/FullPageOfflineBlockingView';
 import useTabRootScrollProps from '@components/Navigation/TabBarBottomContent/useTabRootScrollProps';
 import {usePersonalDetails} from '@components/OnyxListItemProvider';
+import getFirstVisibleIndex from '@components/Search/primitives/getFirstVisibleIndex';
+import {ScrollOffsetContext} from '@components/ScrollOffsetContextProvider';
 import SearchRowSkeleton from '@components/Skeletons/SearchRowSkeleton';
 import {useWideRHPActions} from '@components/WideRHPContextProvider';
 
@@ -106,9 +108,9 @@ import type {NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle} from
 import type {OnyxEntry} from 'react-native-onyx';
 import type {ValueOf} from 'type-fest';
 
-import {findFocusedRoute, useFocusEffect, useIsFocused, useNavigation} from '@react-navigation/native';
+import {findFocusedRoute, useFocusEffect, useIsFocused, useNavigation, useRoute} from '@react-navigation/native';
 import * as Sentry from '@sentry/react-native';
-import React, {startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import React, {startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {View} from 'react-native';
 import Onyx from 'react-native-onyx';
 import Animated, {useAnimatedStyle, useSharedValue, withTiming} from 'react-native-reanimated';
@@ -1059,10 +1061,21 @@ function Search({
     // dropped. Stays set until that page actually shows up in the snapshot.
     const wantedOffsetRef = useRef<number | undefined>(undefined);
 
+    // The route the Search list lives under, the same way LHNOptionsList saves and restores its index.
+    const searchRoute = useRoute();
+    const {saveScrollIndex} = useContext(ScrollOffsetContext);
+
     // rebuilds report ends too, only a scroll moves the visible rows; not onScroll, it's a worklet on native
     const hasScrolledSinceLastEndRef = useRef(true);
-    const onViewableItemsChanged = () => {
+    const onViewableItemsChanged: NonNullable<CommonSearchViewProps['onViewableItemsChanged']> = ({viewableItems}) => {
         hasScrolledSinceLastEndRef.current = true;
+
+        // Remember which row is on screen so the list can be restored to it after a back-navigation.
+        // A pixel offset does not survive the list being re-rendered from page 1; a row index does.
+        const index = getFirstVisibleIndex(viewableItems);
+        if (index !== undefined) {
+            saveScrollIndex(searchRoute, index);
+        }
     };
 
     const fetchMoreResults = useCallback(() => {

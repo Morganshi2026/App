@@ -5,6 +5,8 @@ import type {GetReportTableColumnStylesParams} from '@styles/utils';
 
 import type {CardList, PolicyCategories, PolicyTagLists, Transaction} from '@src/types/onyx';
 
+import type {FlashListProps} from '@shopify/flash-list';
+
 import type React from 'react';
 import type {NativeScrollEvent, NativeSyntheticEvent, StyleProp, ViewStyle} from 'react-native';
 import type {OnyxCollection} from 'react-native-onyx';
@@ -67,7 +69,7 @@ type CommonSearchViewProps = {
     /** Scroll handler forwarded to the list. */
     onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
-    onViewableItemsChanged?: () => void;
+    onViewableItemsChanged?: FlashListProps<SearchListItem>['onViewableItemsChanged'];
 
     contentContainerStyle: StyleProp<ViewStyle>;
     containerStyle: StyleProp<ViewStyle>;
