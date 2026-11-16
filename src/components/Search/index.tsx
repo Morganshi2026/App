@@ -1061,12 +1061,13 @@ function Search({
     // dropped. Stays set until that page actually shows up in the snapshot.
     const wantedOffsetRef = useRef<number | undefined>(undefined);
 
+    // rebuilds report ends too, only a scroll moves the visible rows; not onScroll, it's a worklet on native
+    const hasScrolledSinceLastEndRef = useRef(true);
+
     // The route the Search list lives under, the same way LHNOptionsList saves and restores its index.
     const searchRoute = useRoute();
     const {saveScrollIndex} = useContext(ScrollOffsetContext);
 
-    // rebuilds report ends too, only a scroll moves the visible rows; not onScroll, it's a worklet on native
-    const hasScrolledSinceLastEndRef = useRef(true);
     const onViewableItemsChanged: NonNullable<CommonSearchViewProps['onViewableItemsChanged']> = ({viewableItems}) => {
         hasScrolledSinceLastEndRef.current = true;
 

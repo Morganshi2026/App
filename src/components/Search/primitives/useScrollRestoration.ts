@@ -38,7 +38,7 @@ type PendingRestore = {
  */
 function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | null>) {
     const route = useRoute();
-    const {getScrollOffset, getScrollIndex} = useContext(ScrollOffsetContext);
+    const {getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore} = useContext(ScrollOffsetContext);
 
     const pendingRestoreRef = useRef<PendingRestore | undefined>(undefined);
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -55,6 +55,15 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
 
             pendingRestoreRef.current = {index, offset, deadline: Date.now() + MAX_RESTORE_WAIT_MS};
 
+            // While the restore runs, the list must not be allowed to replace the saved position with the position
+            // it was clamped to while it was still on an earlier page.
+            beginScrollRestore(route, index, offset);
+
+            const finishRestore = () => {
+                pendingRestoreRef.current = undefined;
+                endScrollRestore(route);
+            };
+
             const tryRestore = () => {
                 const pending = pendingRestoreRef.current;
 
@@ -65,7 +74,7 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
                 if (pending.index !== undefined) {
                     try {
                         listRef.current.scrollToIndex({index: pending.index, animated: false, viewPosition: 0});
-                        pendingRestoreRef.current = undefined;
+                        finishRestore();
                         return;
                     } catch {
                         // The row is not in the list yet - the list is still on an earlier page. Keep the
@@ -85,7 +94,7 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
                     listRef.current.scrollToOffset({offset: pending.offset, animated: false});
                 }
 
-                pendingRestoreRef.current = undefined;
+                finishRestore();
             };
 
             tryRestore();
@@ -96,9 +105,9 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
                     retryTimerRef.current = undefined;
                 }
 
-                pendingRestoreRef.current = undefined;
+                finishRestore();
             };
-        }, [getScrollOffset, getScrollIndex, route, listRef]),
+        }, [getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore, route, listRef]),
     );
 }
 
