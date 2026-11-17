@@ -37,6 +37,14 @@ type ScrollOffsetContextValue = {
     /** Ends the pending scroll restore for the given route. */
     endScrollRestore: (route: PlatformStackRouteProp<ParamListBase>) => void;
 
+    /**
+     * Whether the list has reported the row the pending restore is waiting for.
+     *
+     * The list reports the row it ended up on through saveScrollIndex, so this tells the restore that the target
+     * row is on screen and the restore can stop.
+     */
+    isScrollRestoreReached: (route: PlatformStackRouteProp<ParamListBase>) => boolean;
+
     /** Clean scroll offsets of screen that aren't anymore in the state */
     cleanStaleScrollOffsets: (state: State) => void;
 };
@@ -52,6 +60,7 @@ const defaultValue: ScrollOffsetContextValue = {
     getScrollIndex: () => undefined,
     beginScrollRestore: () => {},
     endScrollRestore: () => {},
+    isScrollRestoreReached: () => false,
     cleanStaleScrollOffsets: () => {},
 };
 
@@ -109,6 +118,10 @@ function ScrollOffsetContextProvider({children}: ScrollOffsetContextProviderProp
     // The restore that is currently in flight, per route key.
     const pendingRestoresRef = useRef<Record<string, {targetIndex?: number; targetOffset?: number}>>({});
 
+    // The row the list reported as its first viewable row, per route key. It is remembered even while a restore
+    // is pending, so the restore can tell when the list actually reached the row it is waiting for.
+    const reportedIndexesRef = useRef<Record<string, number>>({});
+
     const previousPriorityMode = usePrevious(priorityMode);
     const previousInboxTab = usePrevious(inboxTab);
 
@@ -157,6 +170,10 @@ function ScrollOffsetContextProvider({children}: ScrollOffsetContextProviderProp
         const key = getKey(route);
         const pendingRestore = pendingRestoresRef.current[key];
 
+        // The reported row is remembered even when it is not stored, so the pending restore can tell when the
+        // list reached the row it is waiting for.
+        reportedIndexesRef.current[key] = scrollIndex;
+
         if (!isScrollIndexReachable(pendingRestore?.targetIndex, scrollIndex)) {
             // The list reported a different row than the row that is being restored, so it has not reached the
             // target row yet. Keep the target so the restore can still land on it.
@@ -174,11 +191,27 @@ function ScrollOffsetContextProvider({children}: ScrollOffsetContextProviderProp
     };
 
     const beginScrollRestore: ScrollOffsetContextValue['beginScrollRestore'] = (route, targetIndex, targetOffset) => {
-        pendingRestoresRef.current[getKey(route)] = {targetIndex, targetOffset};
+        const key = getKey(route);
+        pendingRestoresRef.current[key] = {targetIndex, targetOffset};
+
+        // The row the list reported before the restore started is the row the user left the screen on, not the
+        // result of the restore, so it must not count as the restore having reached its target.
+        delete reportedIndexesRef.current[key];
     };
 
     const endScrollRestore: ScrollOffsetContextValue['endScrollRestore'] = (route) => {
         delete pendingRestoresRef.current[getKey(route)];
+    };
+
+    const isScrollRestoreReached: ScrollOffsetContextValue['isScrollRestoreReached'] = (route) => {
+        const key = getKey(route);
+        const pendingRestore = pendingRestoresRef.current[key];
+
+        if (pendingRestore?.targetIndex === undefined) {
+            return false;
+        }
+
+        return reportedIndexesRef.current[key] === pendingRestore.targetIndex;
     };
 
     const cleanScrollPositions = (keys: string[], shouldDelete: (key: string) => boolean) => {
@@ -189,6 +222,7 @@ function ScrollOffsetContextProvider({children}: ScrollOffsetContextProviderProp
 
             delete scrollOffsetsRef.current[key];
             delete scrollIndexesRef.current[key];
+            delete reportedIndexesRef.current[key];
         }
     };
 
@@ -222,6 +256,7 @@ function ScrollOffsetContextProvider({children}: ScrollOffsetContextProviderProp
         getScrollIndex,
         beginScrollRestore,
         endScrollRestore,
+        isScrollRestoreReached,
     };
 
     return <ScrollOffsetContext.Provider value={contextValue}>{children}</ScrollOffsetContext.Provider>;

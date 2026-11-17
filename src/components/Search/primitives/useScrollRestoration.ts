@@ -6,11 +6,17 @@ import type {RefObject} from 'react';
 import {useFocusEffect, useRoute} from '@react-navigation/native';
 import {useCallback, useContext, useRef} from 'react';
 
-/** How long we keep waiting for the target row to arrive before we give up on the row index. */
+/** How long we keep waiting for the target row before we apply the saved pixel offset. */
 const MAX_RESTORE_WAIT_MS = 2000;
+
+/** How long we keep trying the row index after the pixel offset was applied, while the next page loads. */
+const MAX_FALLBACK_WAIT_MS = 5000;
 
 /** How often we retry while the target row is still missing. */
 const RESTORE_RETRY_INTERVAL_MS = 50;
+
+/** How often we retry once the saved pixel offset was applied. */
+const FALLBACK_RETRY_INTERVAL_MS = 250;
 
 type PendingRestore = {
     /** The row we want to land on. */
@@ -19,8 +25,14 @@ type PendingRestore = {
     /** The pixel offset saved for the same route, used when the row cannot be restored. */
     offset?: number;
 
-    /** Timestamp after which we stop waiting for the row. */
+    /** Timestamp after which the saved pixel offset is applied. */
+    fallbackAt: number;
+
+    /** Timestamp after which we stop trying. */
     deadline: number;
+
+    /** Whether the saved pixel offset has been applied already. */
+    usedFallback: boolean;
 };
 
 /**
@@ -38,7 +50,7 @@ type PendingRestore = {
  */
 function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | null>) {
     const route = useRoute();
-    const {getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore} = useContext(ScrollOffsetContext);
+    const {getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore, isScrollRestoreReached} = useContext(ScrollOffsetContext);
 
     const pendingRestoreRef = useRef<PendingRestore | undefined>(undefined);
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -53,7 +65,8 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
                 return;
             }
 
-            pendingRestoreRef.current = {index, offset, deadline: Date.now() + MAX_RESTORE_WAIT_MS};
+            const now = Date.now();
+            pendingRestoreRef.current = {index, offset, fallbackAt: now + MAX_RESTORE_WAIT_MS, deadline: now + MAX_RESTORE_WAIT_MS + MAX_FALLBACK_WAIT_MS, usedFallback: false};
 
             // While the restore runs, the list must not be allowed to replace the saved position with the position
             // it was clamped to while it was still on an earlier page.
@@ -71,27 +84,51 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
                     return;
                 }
 
-                if (pending.index !== undefined) {
-                    try {
-                        listRef.current.scrollToIndex({index: pending.index, animated: false, viewPosition: 0});
-                        finishRestore();
-                        return;
-                    } catch {
-                        // The row is not in the list yet - the list is still on an earlier page. Keep the
-                        // restore pending and try again later. Falling back to the pixel offset here would
-                        // land on the short list, which is exactly the bug this change fixes.
+                if (pending.index === undefined) {
+                    // There is no row index to restore: apply the saved pixel offset.
+                    if (pending.offset) {
+                        listRef.current.scrollToOffset({offset: pending.offset, animated: false});
                     }
 
-                    if (Date.now() < pending.deadline) {
-                        retryTimerRef.current = setTimeout(tryRestore, RESTORE_RETRY_INTERVAL_MS);
-                        return;
+                    finishRestore();
+                    return;
+                }
+
+                try {
+                    listRef.current.scrollToIndex({index: pending.index, animated: false, viewPosition: 0});
+                } catch {
+                    // The row is not in the list yet - the list is still on an earlier page. The restore stays
+                    // pending and is tried again.
+                }
+
+                // The list reports the row it ended up on, so the restore is done once it reports the target row.
+                if (isScrollRestoreReached(route)) {
+                    finishRestore();
+                    return;
+                }
+
+                const currentTime = Date.now();
+
+                if (currentTime < pending.fallbackAt) {
+                    retryTimerRef.current = setTimeout(tryRestore, RESTORE_RETRY_INTERVAL_MS);
+                    return;
+                }
+
+                if (!pending.usedFallback) {
+                    // The row still is not in the list, so the saved pixel offset is applied. The list clamps it to
+                    // the end of the page it holds, which is what makes the next page load, and the row the user
+                    // left the screen on arrives with it. The restore stays pending so it can still land on that
+                    // row instead of leaving the user at the end of the first page.
+                    pending.usedFallback = true;
+
+                    if (pending.offset) {
+                        listRef.current.scrollToOffset({offset: pending.offset, animated: false});
                     }
                 }
 
-                // There is no row index to restore, or the row never arrived: fall back to the saved pixel
-                // offset so the outcome is no worse than before this change.
-                if (pending.offset) {
-                    listRef.current.scrollToOffset({offset: pending.offset, animated: false});
+                if (currentTime < pending.deadline) {
+                    retryTimerRef.current = setTimeout(tryRestore, FALLBACK_RETRY_INTERVAL_MS);
+                    return;
                 }
 
                 finishRestore();
@@ -107,7 +144,7 @@ function useScrollRestoration<TItem>(listRef: RefObject<FlashListRef<TItem> | nu
 
                 finishRestore();
             };
-        }, [getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore, route, listRef]),
+        }, [getScrollOffset, getScrollIndex, beginScrollRestore, endScrollRestore, isScrollRestoreReached, route, listRef]),
     );
 }
 
