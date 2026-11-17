@@ -434,6 +434,60 @@ describe('useFilesValidation', () => {
         });
     });
 
+    describe('receipt size limit', () => {
+        it('shows the too-large error when the resized receipt is still over the receipt limit', async () => {
+            const largeReceipt = createFile({uri: 'file-large', name: 'receipt.jpg'});
+            const stillTooLarge = createFile({uri: 'file-resized', name: 'receipt.jpg', size: CONST.API_ATTACHMENT_VALIDATIONS.RECEIPT_MAX_SIZE + 1});
+            mockInvalid(CONST.FILE_VALIDATION_ERRORS.FILE_TOO_LARGE);
+            mockResizeImageIfNeeded.mockResolvedValue(stillTooLarge);
+
+            const {result, onFilesValidated} = setup();
+            triggerValidation(result, [largeReceipt], [], {isValidatingReceipts: true});
+
+            // The receipt is still over the limit after the resize, so the user has to be told instead of the file being
+            // handed to the upload as a valid one.
+            await waitFor(() => expect(mockShowConfirmModal).toHaveBeenCalledTimes(1));
+            expect(getShowConfirmModalOption('title')).toBe('attachmentPicker.attachmentTooLarge');
+            expect(getShowConfirmModalOption('prompt')).toBe('attachmentPicker.sizeExceededWithLimit');
+
+            await resolveModal('CLOSE');
+
+            expect(onFilesValidated).not.toHaveBeenCalled();
+        });
+
+        it('shows the too-large error when the resized receipt has no size to check', async () => {
+            const largeReceipt = createFile({uri: 'file-large', name: 'receipt.jpg'});
+            const resizedWithoutSize = createFile({uri: 'file-resized', name: 'receipt.jpg'});
+            delete resizedWithoutSize.size;
+            mockInvalid(CONST.FILE_VALIDATION_ERRORS.FILE_TOO_LARGE);
+            mockResizeImageIfNeeded.mockResolvedValue(resizedWithoutSize);
+
+            const {result, onFilesValidated} = setup();
+            triggerValidation(result, [largeReceipt], [], {isValidatingReceipts: true});
+
+            // A resized file without a size can't be proven to fit the limit either, so it is reported as too large.
+            await waitFor(() => expect(mockShowConfirmModal).toHaveBeenCalledTimes(1));
+            expect(getShowConfirmModalOption('title')).toBe('attachmentPicker.attachmentTooLarge');
+
+            await resolveModal('CLOSE');
+
+            expect(onFilesValidated).not.toHaveBeenCalled();
+        });
+
+        it('uploads the resized receipt when it now fits the receipt limit', async () => {
+            const largeReceipt = createFile({uri: 'file-large', name: 'receipt.jpg'});
+            const resizedReceipt = createFile({uri: 'file-resized', name: 'receipt.jpg', size: 1024});
+            mockInvalid(CONST.FILE_VALIDATION_ERRORS.FILE_TOO_LARGE);
+            mockResizeImageIfNeeded.mockResolvedValue(resizedReceipt);
+
+            const {result, onFilesValidated} = setup();
+            triggerValidation(result, [largeReceipt], [], {isValidatingReceipts: true});
+
+            await waitFor(() => expect(onFilesValidated).toHaveBeenCalledWith([resizedReceipt], []));
+            expect(mockShowConfirmModal).not.toHaveBeenCalled();
+        });
+    });
+
     describe('PDF validation', () => {
         async function triggerPDFCallback(
             result: {current: UseFilesValidationResult},

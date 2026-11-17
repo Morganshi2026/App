@@ -716,6 +716,9 @@ const createFile = (file: File & Pick<ImagePickerResponse, 'width' | 'height'>):
             uri: file.uri,
             name: file.name,
             type: file.type,
+            // The native resize result reports only the URI of the new file, so the size is carried over from it when
+            // it is known: without it the resized file cannot be checked against the upload limit.
+            size: file.size,
         };
         // Keep the dimensions so the optimistic attachment renders at its real aspect ratio instead of jumping from a square on load.
         // Only add them when set, because the optimistic HTML writes the attribute whenever the key exists, even if the value is undefined.

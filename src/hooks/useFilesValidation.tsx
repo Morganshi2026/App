@@ -357,6 +357,19 @@ function useFilesValidation(onFilesValidated: (files: FileObject[], dataTransfer
             for (const [index, result] of toResizeResults.entries()) {
                 if (result.status === 'fulfilled') {
                     const value = result.value;
+                    const maxFileSize = validationState.isValidatingReceipts ? CONST.API_ATTACHMENT_VALIDATIONS.RECEIPT_MAX_SIZE : CONST.API_ATTACHMENT_VALIDATIONS.MAX_SIZE;
+
+                    // The resize only helps when the result fits the limit now. The file was rejected for being too
+                    // large, so a result that is still too large has to surface the error instead of being handed to the
+                    // upload as a valid file, and a result without a size can't be proven to fit either.
+                    if (value.size == null || value.size > maxFileSize) {
+                        collectedErrors.current.push({
+                            error: CONST.FILE_VALIDATION_ERRORS.FILE_TOO_LARGE,
+                            isValidatingMultipleFiles: validationState.isValidatingMultipleFiles,
+                        });
+                        continue;
+                    }
+
                     validNonPdfFiles.push(value);
                     updateFileOrderMapping(filesToResize.at(index), value);
                 } else {
